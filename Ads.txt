@@ -1,0 +1,126 @@
+public class Ads {
+    private static InterstitialAd mInterstitialAd;
+    FirebaseFirestore db;
+    private String IntersData;
+    private final Activity activity;
+    private final ClickCounterManager clickCounterManager = ClickCounterManager.getInstance();
+
+    // invalid click for banner
+    int count=0;
+    int countLimit=2;
+    int timeToHide=60*1000*5;
+    SharedPreferences sharedPreferences;
+    SharedPreferences.Editor editor;
+    AdView adView;
+
+    public Ads(Activity activity) {
+        this.activity = activity;
+        sharedPreferences = activity.getSharedPreferences("AdPreferences", Context.MODE_PRIVATE);
+        editor = sharedPreferences.edit();
+
+        if (clickCounterManager.getClickCount() == 0) {
+            loadInterstitialAd();
+        }
+    }
+
+
+
+    public void loadInterstitialAd() {
+        if (mInterstitialAd == null) {
+            db = FirebaseFirestore.getInstance();
+            DocumentReference document = db.collection("PerfectWeb").document("Version23");
+            document.get().addOnSuccessListener(new OnSuccessListener<DocumentSnapshot>() {
+                @Override
+                public void onSuccess(DocumentSnapshot documentSnapshot) {
+                    if (documentSnapshot.exists()) {
+                        boolean is4ClickInterstitialEnabled = Boolean.TRUE.equals(documentSnapshot.getBoolean("status"));
+                        if (is4ClickInterstitialEnabled) {
+                            IntersData = documentSnapshot.getString("4ClickInterstitial");
+                            AdRequest adRequest = new AdRequest.Builder().build();
+                            InterstitialAd.load(activity, IntersData, adRequest, new InterstitialAdLoadCallback() {
+                                @Override
+                                public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
+                                    super.onAdFailedToLoad(loadAdError);
+                                    mInterstitialAd = null;
+                                    loadInterstitialAd();
+                                }
+                                @Override
+                                public void onAdLoaded(@NonNull InterstitialAd interstitialAd) {
+                                    super.onAdLoaded(interstitialAd);
+                                    mInterstitialAd = interstitialAd;
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+        }
+    }
+    public void showInterstitialAndMove(Class<?> targetActivity) {
+        clickCounterManager.incrementClickCount();
+        if (clickCounterManager.getClickCount() >= 5) {
+            if (mInterstitialAd != null) {
+                mInterstitialAd.show(activity);
+                mInterstitialAd.setFullScreenContentCallback(new FullScreenContentCallback() {
+                    @Override
+                    public void onAdDismissedFullScreenContent() {
+                        super.onAdDismissedFullScreenContent();
+                        clickCounterManager.resetClickCount();
+                        mInterstitialAd = null;
+                        navigateToTargetActivity(targetActivity);
+                        activity.finishAffinity();
+                    }
+                });
+            } else {
+                navigateToTargetActivity(targetActivity);
+                activity.finishAffinity();
+            }
+        } else {
+            navigateToTargetActivity(targetActivity);
+            activity.finishAffinity();
+        }
+    }
+    private void navigateToTargetActivity(Class<?> targetActivity) {
+        Intent intent = new Intent(activity, targetActivity);
+        activity.startActivity(intent);
+    }
+    public void Banner(LinearLayout relativeLayout) {
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        DocumentReference document = db.collection("PerfectWeb").document("Version23");
+        document.get().addOnSuccessListener(documentSnapshot -> {
+            if (documentSnapshot.exists()) {
+                boolean is4ClickInterstitialEnabled = Boolean.TRUE.equals(documentSnapshot.getBoolean("status"));
+                if (is4ClickInterstitialEnabled) {
+                    long currentTime = System.currentTimeMillis();
+                    long lastClicked = sharedPreferences.getLong("lastClickedTime", 0);
+                    if (currentTime - lastClicked >= timeToHide) {
+                        adView = new AdView(activity);
+                        adView.setAdListener(new AdListener() {
+                            @Override
+                            public void onAdClicked() {
+                                super.onAdClicked();
+                                count++;
+                                if (count >= countLimit) {
+                                    adView.setVisibility(View.GONE);
+                                    long currentTime = System.currentTimeMillis();
+                                    long lastClickTime = sharedPreferences.getLong("lastClickedTime", 0);
+                                    if (currentTime - lastClickTime >= timeToHide) {
+                                        editor.putLong("lastClickedTime", currentTime);
+                                        editor.apply();
+                                    } else {
+                                        adView.setVisibility(View.GONE);
+                                    }
+                                }
+                            }
+                        });
+                        adView.setAdUnitId(Objects.requireNonNull(documentSnapshot.getString("banner")));
+                        adView.setAdSize(AdSize.BANNER);
+                        relativeLayout.addView(adView);
+                        AdRequest adRequest = new AdRequest.Builder().build();
+                        adView.loadAd(adRequest);
+                    }
+                }
+            }
+        });
+    }
+}
